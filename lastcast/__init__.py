@@ -38,6 +38,7 @@ class ScrobbleListener(object):
             username=config['lastfm']['user_name'],
             password_hash=pylast.md5(config['lastfm']['password']))
 
+        self.now_playing = {}
         self.last_scrobbled = {}
         self.last_played = {}
 
@@ -110,6 +111,9 @@ class ScrobbleListener(object):
         self.cast.wait()
         click.echo('Using chromecast: %s' % self.cast.device.friendly_name)
 
+    def _new_track(self, a, b):
+        return (not a or not b) or (a['artist'] != b['artist'] or a['album'] != b['album'] or a['title'] != b['title'])
+
     def _on_status(self, status):
         meta = {
             'artist': status.artist if status.artist else status.album_artist,
@@ -117,12 +121,23 @@ class ScrobbleListener(object):
             'title': status.title,
         }
 
+        if self._new_track(self.now_playing, meta):
+            self.now_playing = meta.copy()
+            self.now_playing['started_at'] = time.time() - status.current_time
+            self.now_playing['current_time'] = status.current_time
+            self.now_playing['duration'] = status.duration
+        elif status.current_time > self.now_playing['current_time']:
+            self.now_playing['started_at'] = time.time() - status.current_time
+            self.now_playing['current_time'] = status.current_time
+        else:
+            self.now_playing['current_time'] = time.time() - self.now_playing['started_at']
+
         self._now_playing(meta)
 
         # Only scrobble if track has played 50% through (or 120 seconds,
         # whichever comes first).
-        if status.current_time > SCROBBLE_THRESHOLD_SECS or \
-           (status.current_time / status.duration) >= SCROBBLE_THRESHOLD_PCT:
+        if self.now_playing['current_time'] > SCROBBLE_THRESHOLD_SECS or \
+           (self.now_playing['current_time'] / self.now_playing['duration']) >= SCROBBLE_THRESHOLD_PCT:
             self._scrobble(meta)
 
     def _now_playing(self, track_meta):
